@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>KM Tracker App (Offline — GitHub Pages)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+    body { font-family: Arial; margin: 20px; background:#f4f4f4; }
+    h2 { margin-top:0; }
+    .box { background:white; padding:15px; border-radius:10px; margin-bottom:20px; }
+    input, select { width:100%; padding:8px; margin-top:5px; }
+    button { padding:10px; margin-top:10px; cursor:pointer; }
+    table { width:100%; border-collapse:collapse; margin-top:10px; }
+    th, td { padding:8px; border:1px solid #ddd; }
+    .pending { background:#fff7d6; }
+    .confirmed { background:#e8ffe9; }
+    .rejected { background:#ffe8e8; }
+</style>
+</head>
+<body>
+
+<h2>🚗 KM Tracker Application</h2>
+<p>Offline app — data saved in browser (LocalStorage). Works on GitHub Pages.</p>
+
+<!-- VEHICLE SECTION -->
+<div class="box">
+    <h3>Add Vehicle</h3>
+    <input id="vehName" placeholder="Vehicle Number (MH12AB1234)">
+    <button onclick="addVehicle()">Add Vehicle</button>
+
+    <h4 style="margin-top:15px;">Vehicle List</h4>
+    <div id="vehList"></div>
+</div>
+
+<!-- KM UPDATE SECTION -->
+<div class="box">
+    <h3>Enter KM Update</h3>
+    <select id="vehSelect"></select>
+    <input id="kmValue" type="number" placeholder="Enter Odometer KM">
+    <input id="kmNotes" placeholder="Notes (optional)">
+    <button onclick="saveKM()">Save KM Update</button>
+</div>
+
+<!-- ADMIN SECTION -->
+<div class="box">
+    <h3>Admin Panel</h3>
+    <input id="adminPin" type="password" placeholder="Enter Admin PIN (default 1234)">
+    <button onclick="loginAdmin()">Login</button>
+
+    <h4>Set Admin PIN</h4>
+    <input id="newPin" type="password" placeholder="New PIN">
+    <button onclick="setPin()">Update PIN</button>
+
+    <div id="adminStatus"></div>
+</div>
+
+<!-- PENDING -->
+<div class="box">
+    <h3>Pending KM Updates</h3>
+    <div id="pendingList"></div>
+</div>
+
+<!-- HISTORY -->
+<div class="box">
+    <h3>History</h3>
+    <div id="historyList"></div>
+</div>
+
+<script>
+/* DATABASE */
+let vehicles = JSON.parse(localStorage.getItem("vehicles") || "[]");
+let updates = JSON.parse(localStorage.getItem("updates") || "[]");
+let adminPIN = localStorage.getItem("adminPIN") || "1234";
+let isAdmin = false;
+
+/* SAVE */
+function saveDB() {
+    localStorage.setItem("vehicles", JSON.stringify(vehicles));
+    localStorage.setItem("updates", JSON.stringify(updates));
+    localStorage.setItem("adminPIN", adminPIN);
+}
+
+/* VEHICLES */
+function addVehicle() {
+    let v = document.getElementById("vehName").value.trim();
+    if (!v) return alert("Enter vehicle number");
+    vehicles.push({ id: Date.now(), name: v, last: 0 });
+    saveDB();
+    document.getElementById("vehName").value = "";
+    loadVehicles();
+}
+
+function loadVehicles() {
+    let list = document.getElementById("vehList");
+    let sel = document.getElementById("vehSelect");
+    list.innerHTML = "";
+    sel.innerHTML = "";
+
+    vehicles.forEach(v => {
+        list.innerHTML += `<div>🚘 <b>${v.name}</b> — Last KM: ${v.last}</div>`;
+        sel.innerHTML += `<option value="${v.id}">${v.name}</option>`;
+    });
+}
+
+/* SAVE KM */
+function saveKM() {
+    let id = document.getElementById("vehSelect").value;
+    let km = Number(document.getElementById("kmValue").value);
+    let notes = document.getElementById("kmNotes").value;
+    if (!km) return alert("Enter KM");
+
+    let vehicle = vehicles.find(v => v.id == id);
+    let diff = km - vehicle.last;
+
+    let status = "confirmed";
+    if (km < vehicle.last || diff > 500) status = "pending";
+
+    let entry = {
+        id: Date.now(),
+        vehId: id,
+        veh: vehicle.name,
+        km,
+        prev: vehicle.last,
+        diff,
+        notes,
+        status,
+        time: new Date().toLocaleString()
+    };
+
+    updates.unshift(entry);
+
+    if (status === "confirmed") vehicle.last = km;
+
+    saveDB();
+    document.getElementById("kmValue").value = "";
+    document.getElementById("kmNotes").value = "";
+    loadPending();
+    loadHistory();
+    loadVehicles();
+}
+
+/* ADMIN */
+function loginAdmin() {
+    let pin = document.getElementById("adminPin").value;
+    if (pin === adminPIN) {
+        isAdmin = true;
+        document.getElementById("adminStatus").innerHTML = "<b>Admin Logged In</b>";
+        loadPending();
+    } else {
+        alert("Wrong PIN");
+    }
+}
+
+function setPin() {
+    let newPin = document.getElementById("newPin").value;
+    if (!newPin) return alert("Enter new PIN");
+    adminPIN = newPin;
+    saveDB();
+    document.getElementById("newPin").value = "";
+    alert("PIN updated");
+}
+
+/* PENDING */
+function loadPending() {
+    let div = document.getElementById("pendingList");
+    let pending = updates.filter(u => u.status === "pending");
+
+    if (pending.length === 0) {
+        div.innerHTML = "<i>No pending updates</i>";
+        return;
+    }
+
+    div.innerHTML = pending.map(u => `
+        <div class="pending" style="padding:10px;margin-bottom:8px;">
+            <b>${u.veh}</b><br>
+            KM: ${u.km} (Prev ${u.prev}, Diff ${u.diff})<br>
+            Notes: ${u.notes || "-"}<br>
+            Time: ${u.time}<br>
+            ${isAdmin ? `
+            <button onclick="approve(${u.id})">Approve</button>
+            <button onclick="reject(${u.id})">Reject</button>` :
+            "<i>Admin login required</i>"
+            }
+        </div>
+    `).join("");
+}
+
+function approve(id) {
+    let u = updates.find(x => x.id == id);
+    u.status = "confirmed";
+    let v = vehicles.find(x => x.id == u.vehId);
+    v.last = u.km;
+    saveDB();
+    loadPending();
+    loadHistory();
+    loadVehicles();
+}
+
+function reject(id) {
+    let u = updates.find(x => x.id == id);
+    u.status = "rejected";
+    saveDB();
+    loadPending();
+    loadHistory();
+}
+
+/* HISTORY */
+function loadHistory() {
+    let div = document.getElementById("historyList");
+    if (updates.length === 0) {
+        div.innerHTML = "<i>No history yet</i>";
+        return;
+    }
+
+    div.innerHTML = `
+        <table>
+            <tr><th>Vehicle</th><th>KM</th><th>Prev</th><th>Diff</th><th>Status</th><th>Time</th></tr>
+            ${updates.slice(0,200).map(u => `
+            <tr class="${u.status}">
+                <td>${u.veh}</td>
+                <td>${u.km}</td>
+                <td>${u.prev}</td>
+                <td>${u.diff}</td>
+                <td>${u.status}</td>
+                <td>${u.time}</td>
+            </tr>`).join("")}
+        </table>
+    `;
+}
+
+/* INIT */
+loadVehicles();
+loadPending();
+loadHistory();
+</script>
+
+</body>
+</html>
